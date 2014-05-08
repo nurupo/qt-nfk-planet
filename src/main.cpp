@@ -22,6 +22,7 @@
  */
 
 #include "planet.h"
+#include "settings.h"
 
 #include <QCoreApplication>
 
@@ -30,7 +31,8 @@ int main(int argc, char *argv[])
     QCoreApplication a(argc, argv);
 
     Planet p;
-    p.start("192.168.1.103", 10003);
+    Settings &s = Settings::getInstance();
+    p.start(s.getAddress(), s.getPort());
 
     return a.exec();
 }

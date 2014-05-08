@@ -26,6 +26,8 @@
 
 #include <QMutex>
 #include <QObject>
+#include <QHash>
+#include "settings.h"
 
 class QTimer;
 class Client;
@@ -46,6 +48,7 @@ private:
 
     QList<Client*> clientList;
     QList<Server*> serverList;
+    QHash<QString, int> clientIpCount;
 
     static const char PLANET_VERSION[];
 
@@ -61,6 +64,8 @@ private:
     static const char OLD_VERSION_MESSAGE[];
 
     int version;
+
+    Settings &settings;
 
 private slots:
     void onPingCheck();

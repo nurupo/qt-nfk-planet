@@ -26,6 +26,7 @@
 
 #include <QMetaType>
 #include <QtGlobal>
+#include <QQueue>
 
 class QTcpSocket;
 class Server;
@@ -37,6 +38,20 @@ public:
     int version;
     qint64 lastPinged;
     Server *server;
+
+    void addPenalty(int value);
+    bool isPenaltyLimitReached();
+
+private:
+    struct Penalty {
+        Penalty(quint64 time, int value);
+
+        quint64 time;
+        int value;
+    };
+
+    int penaltyPoints;
+    QQueue<Penalty> penaltyQueue;
 
 };
 

@@ -42,7 +42,7 @@ const char Planet::OLD_VERSION_MESSAGE[] = "L127.0.0.1\rYour version of NF\rK is
         "L127.0.0.1\rCKA4AUTE HOBY|-0\rNFK C CAUTA\r1\r1\r1\r\n\0"
         "L127.0.0.1\r^2needforkill.ru    \r\r1\r1\r1\r\n\0E\n\0";
 
-Planet::Planet()
+Planet::Planet() : settings(Settings::getInstance())
 {
     // check version for sanety
     bool ok;
@@ -103,7 +103,29 @@ void Planet::onClientConnect()
 
     clientList << client;
 
-    qDebug("Client connected: %s:%u.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+    int ipCount = clientIpCount[client->sock->peerAddress().toString()];
+    clientIpCount[client->sock->peerAddress().toString()] = ipCount + 1;
+
+    qDebug("Client connected: %s:%u. There are currently %d connections from client's IP, including this one.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), ipCount + 1);
+
+    if (clientList.size() >= settings.getMaxClients()) {
+        qDebug("Maximum number of clients (%d) reached. Disconnecting client %s:%u.", settings.getMaxClients(), qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+        client->sock->disconnectFromHost();
+        return;
+    }
+
+    if (settings.getBlacklistedIps().contains(client->sock->peerAddress().toString())) {
+        qDebug("Client %s:%u is blacklisted. Disconnecting.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+        client->sock->disconnectFromHost();
+        return;
+    }
+
+    int maxConnectionsFromTheSameIp = settings.getMaxSimultaneousConnectionsFromSingleIp();
+    if (maxConnectionsFromTheSameIp >= 0 && ipCount == maxConnectionsFromTheSameIp) {
+        qDebug("Client %s:%u exceeded the number of maximum simultanious connections from single IP address (%d). Disconnecting.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), maxConnectionsFromTheSameIp);
+        client->sock->disconnectFromHost();
+        return;
+    }
 }
 
 void Planet::onClientDisconnected()
@@ -111,6 +133,11 @@ void Planet::onClientDisconnected()
     Client *client = sender()->property("client").value<Client*>();
 
     qDebug("Client disconnected: %s:%u.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+
+    clientIpCount[client->sock->peerAddress().toString()] = clientIpCount[client->sock->peerAddress().toString()] - 1;
+    if (clientIpCount[client->sock->peerAddress().toString()] <= 0) {
+        clientIpCount.remove(client->sock->peerAddress().toString());
+    }
 
     clientList.removeOne(client);
     if (client->server != NULL) {
@@ -140,6 +167,20 @@ void Planet::onClientReadReady()
 
         qDebug("Command from a client %s:%u received: %s.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), command);
 
+        if (settings.getEnablePenalty() && client->isPenaltyLimitReached()) {
+            qDebug("Client %s:%u reached penalty limit.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+            if (settings.getBlacklistIpOnMaxPointsReached()) {
+                settings.blacklistIp(client->sock->peerAddress().toString());
+                qDebug("Blacklisted IP of client %s:%u.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
+            }
+            if (settings.getDisconnectClientOnMaxPenaltyPointsReached()) {
+                client->sock->disconnectFromHost();
+                return;
+            } else if (settings.getIgnoreClientCommandsOnMaxPenaltyPointsReached()) {
+                return;
+            }
+        }
+
         if (length < 2) {
             qWarning("Client %s:%u sent too short command. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
             client->sock->disconnectFromHost();
@@ -161,6 +202,10 @@ void Planet::onClientReadReady()
 
         switch (command[1]) {
             case 'V': {   /* version request */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getVersionRequestPenalty());
+                }
+
                 if (length == 2) {
                     /* report V075 to old clients */
                     client->version = 75;
@@ -188,40 +233,50 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'G': {  /* servers list request */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getServerListRequestPenalty());
+                }
+
                 if (client->version < QString(PLANET_VERSION).toInt()) {
                     /* send the message to old clients */
-                    if (client->sock->write(OLD_VERSION_MESSAGE) <= 0) {
+                    if (client->sock->write(OLD_VERSION_MESSAGE, sizeof(OLD_VERSION_MESSAGE) - 1) != sizeof(OLD_VERSION_MESSAGE) - 1) {
                         qCritical("Failed to send the old version message to client %s:%u. %s.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), qPrintable(client->sock->errorString()));
                     } else {
                         qDebug("Successfully sent the old version message to client %s:%u.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     }
                 } else {
-                    QString servers;
+                    QByteArray servers;
+                    qint64 serversSize = 0;
                     // value from the original nfkplanet
-                    servers.reserve(90 * servers.size() + 3);
+                    servers.reserve(90 * serverList.size() + 3);
 
                     for (int i = 0; i < serverList.size(); i ++) {
                         Server *server = serverList[i];
 
-                        servers.append(QString("L%1\r%2\r%3\r%4\r%5\r%6\r")
-                                    .arg(server->client->sock->peerAddress().toString())
-                                    .arg(server->hostname)
-                                    .arg(server->mapname)
-                                    .arg(server->gametype)
-                                    .arg(server->currentUsers)
-                                    .arg(server->maxUsers));
+                        QString serverEntry = QString("L%1\r%2\r%3\r%4\r%5\r%6\r")
+                                .arg(server->client->sock->peerAddress().toString())
+                                .arg(server->hostname)
+                                .arg(server->mapname)
+                                .arg(server->gametype)
+                                .arg(server->currentUsers)
+                                .arg(server->maxUsers);
 
                         if (client->version > 76) {
-                            servers.append(QString("%1\r")
+                            serverEntry.append(QString("%1\r")
                                         .arg(server->port));
                         }
 
-                        servers.append("\n\0");
+                        serverEntry.append("\n");
+
+                        servers.append(serverEntry);
+                        servers.append('\0');
+                        serversSize += serverEntry.size() + 1;
                     }
 
-                    servers.append("E\n");
+                    servers.append("E\n\0");
+                    serversSize += 3;
 
-                    if (client->sock->write(servers.toAscii().data()) <= 0) {
+                    if (client->sock->write(servers.data(), serversSize) != serversSize) {
                         qCritical("Failed to send server list to client %s:%u. %s.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), qPrintable(client->sock->errorString()));
                     } else {
                         qDebug("Successfully sent server list to client %s:%u.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
@@ -230,6 +285,9 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'R': {   /* register new server */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getServerRegistrationPenalty());
+                }
 
                 if (client->server != NULL) {
                     qWarning("Client %s:%u tried to register server twice. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
@@ -285,6 +343,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'N': {   /* set server name */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getSetServerNamePenalty());
+                }
+
                 if (client->server == NULL) {
                     qWarning("Client %s:%u has tried to set server name without having a server created. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     client->sock->disconnectFromHost();
@@ -298,6 +360,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'm': {  /* set server map */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getSetServerMapPenalty());
+                }
+
                 if (client->server == NULL) {
                     qWarning("Client %s:%u has tried to set server map name without having a server created. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     client->sock->disconnectFromHost();
@@ -311,6 +377,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'C': {  /* set players count */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getSetPlayersCountPenalty());
+                }
+
                 if (client->server == NULL) {
                     qWarning("Client %s:%u has tried to set current player count without having a server created. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     client->sock->disconnectFromHost();
@@ -324,6 +394,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'M': {  /* set max players count */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getSetMaxPlayersCountPenalty());
+                }
+
                 if (client->server == NULL) {
                     qWarning("Client %s:%u has tried to set server maximum player count without having a server created. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     client->sock->disconnectFromHost();
@@ -337,6 +411,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'P': {  /* set server game type */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getSetGameTypePenalty());
+                }
+
                 if (client->server == NULL) {
                     qWarning("Client %s:%u has tried to set server game type without having a server created. Command dropped. Disconnecting the client.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort());
                     client->sock->disconnectFromHost();
@@ -350,6 +428,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'S': {  /* get number of clients */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getNumberOfClientsRequestPenalty());
+                }
+
                 if (client->sock->write(QString("S%1\n").arg(clientList.size()).toAscii().data()) <= 0) {
                     qCritical("Failed to send planet's' number of connected clients to client %s:%u. %s.", qPrintable(client->sock->peerAddress().toString()), client->sock->peerPort(), qPrintable(client->sock->errorString()));
                 } else {
@@ -358,6 +440,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'K': {  /* ping */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getPingRequestPenalty());
+                }
+
                 client->lastPinged = QDateTime::currentMSecsSinceEpoch();
 
                 if (client->sock->write(QString("K\n").toAscii().data()) <= 0) {
@@ -369,6 +455,10 @@ void Planet::onClientReadReady()
                 break;
             }
             case 'X': {  /* ask for invite */
+                if (settings.getEnablePenalty()) {
+                    client->addPenalty(settings.getInviteRequestPenalty());
+                }
+
                 QStringList serverIpPort = QString(command + 2).split(':');
 
                 if (serverIpPort.size() != 2) {

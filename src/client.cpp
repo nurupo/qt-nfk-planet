@@ -22,4 +22,35 @@
  */
 
 #include "client.h"
+#include "settings.h"
 
+#include <QDateTime>
+
+Client::Penalty::Penalty(quint64 time, int value) : time(time), value(value)
+{
+    // intentially left blank
+}
+
+void Client::addPenalty(int value)
+{
+    penaltyQueue.enqueue(Penalty(QDateTime::currentMSecsSinceEpoch(), value));
+    penaltyPoints += value;
+    qDebug("Adding penalty of %d.", value);
+    qDebug("%d Total penalty points %d.", QTime::currentTime().second(), penaltyPoints);
+}
+
+bool Client::isPenaltyLimitReached()
+{
+    // get onle points that are within last penaltyPeriod seconds
+    quint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+
+    Settings &settings = Settings::getInstance();
+
+    quint64 penaltyPeriodMilliseconds = settings.getPenaltyPeriodSeconds() * 1000;
+
+    while (!penaltyQueue.isEmpty() && (currentTime - penaltyQueue.head().time > penaltyPeriodMilliseconds)) {
+        penaltyPoints -= penaltyQueue.dequeue().value;
+    }
+
+    return penaltyPoints >= settings.getMaxPenaltyPoints();
+}

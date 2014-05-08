@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>texts/settings.ini</file>
+    </qresource>
+</RCC>

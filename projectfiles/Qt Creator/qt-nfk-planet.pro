@@ -21,9 +21,14 @@ SOURCES += \
     ../../src/main.cpp \
     ../../src/client.cpp \
     ../../src/server.cpp \
-    ../../src/planet.cpp
+    ../../src/planet.cpp \
+    ../../src/settings.cpp
 
 HEADERS += \
     ../../src/client.h \
     ../../src/server.h \
-    ../../src/planet.h
+    ../../src/planet.h \
+    ../../src/settings.h
+
+RESOURCES += \
+    ../../resources/resources.qrc
