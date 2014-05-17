@@ -22,6 +22,7 @@
  */
 
 #include "client.h"
+
 #include "settings.h"
 
 #include <QDateTime>
@@ -35,8 +36,7 @@ void Client::addPenalty(int value)
 {
     penaltyQueue.enqueue(Penalty(QDateTime::currentMSecsSinceEpoch(), value));
     penaltyPoints += value;
-    qDebug("Adding penalty of %d.", value);
-    qDebug("%d Total penalty points %d.", QTime::currentTime().second(), penaltyPoints);
+    qDebug("Adding penalty of %d. Total penalty points during last %d second period: %d/%d.", value, Settings::getInstance().getPenaltyPeriodSeconds(), penaltyPoints, Settings::getInstance().getMaxPenaltyPoints());
 }
 
 bool Client::isPenaltyLimitReached()

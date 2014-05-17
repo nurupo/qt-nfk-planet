@@ -24,9 +24,12 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#include <QString>
+#include <QMutex>
 #include <QSet>
+#include <QString>
 
+/** Settings class gives access to settings options set in the settings file.
+ */
 class Settings
 {
 public:
@@ -103,6 +106,7 @@ private:
 
     QSet<QString> blacklistedIpSet;
 
+    QMutex blacklistedIpMutex;
 };
 
 #endif // SETTINGS_H

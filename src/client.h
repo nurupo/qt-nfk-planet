@@ -25,12 +25,28 @@
 #define CLIENT_H
 
 #include <QMetaType>
-#include <QtGlobal>
 #include <QQueue>
+#include <QtGlobal>
 
 class QTcpSocket;
 class Server;
 
+/** Client represents anyone connected to the Planet.
+ *
+ *  Clients have optional penalty system, which is aimed to prevent flooding
+ *  of the Planet by malicious clients. Every valid command client sends has
+ *  a penalty value associated with it, which is based on the complexity of
+ *  that command (requires locking for writing? requires iterating over a list
+ *  of clients/servers? etc). So every time a valid command is received,
+ *  client's penalty points increase. If client exceeds maximum penalty points,
+ *  then some action is taken. Penalty points for each command, maximum penalty
+ *  points and the action are specified in the settings file. The penalty system
+ *  takes into account only penalty points received during last penaltyPediod
+ *  seconds, which is also specified in settings. Regular clients shouldn't be
+ *  able to generate enough penalty points to reach the default number of max.
+ *  penalty points, so whoever reached it is considered to be a malicious client
+ *  that tries to flood the Planet with commands.
+ */
 class Client
 {
 public:

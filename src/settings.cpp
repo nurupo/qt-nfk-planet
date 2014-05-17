@@ -108,6 +108,7 @@ void Settings::load(const QString &filePath)
 
 void Settings::blacklistIp(QString ip)
 {
+    blacklistedIpMutex.lock();
     if (blacklistedIpSet.contains(ip)) {
         qDebug("Trying to blacklist IP %s which is already blacklisted.", qPrintable(ip));
         return;
@@ -119,4 +120,6 @@ void Settings::blacklistIp(QString ip)
         s.setValue("IP", ip);
     s.endArray();
     blacklistedIpSet.insert(ip);
+    s.sync();
+    blacklistedIpMutex.unlock();
 }

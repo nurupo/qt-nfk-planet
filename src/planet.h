@@ -24,31 +24,51 @@
 #ifndef PLANET_H
 #define PLANET_H
 
-#include <QMutex>
-#include <QObject>
-#include <QHash>
 #include "settings.h"
 
-class QTimer;
-class Client;
-class Server;
-class QTcpServer;
+#include <QHash>
+#include <QMutex>
+#include <QReadWriteLock>
+#include <QTcpServer>
 
-class Planet : public QObject
+class Client;
+class QThread;
+class QTimer;
+class Server;
+class ThreadWorker;
+
+/** Planet listens for incoming connections on a TCP socket and moves each connected client to a
+ *  ThreadWorker with the least number of currently connected clients, which runs in a completely
+ *  separate thread.
+ *
+ *  It's beneficial to process clients in separate threads because the most common operations clients
+ *  do are read operations: Planet version request, get list of servers, ping and send an invite. Write
+ *  operations are only used when adding/removing a client and adding a server. Moreover, ThreadWorkers
+ *  process only clients assigned to them, they never process some other thread's clients (at least
+ *  directly). So they just need synchronization when accessing Planet's clientList, serverList and
+ *  clientIpCount, which most of the time would be locking for read, which can be done simultaneously by
+ *  multiple threads with the use of QReadWriteLock.
+ */
+class Planet : public QTcpServer
 {
     Q_OBJECT
 public:
-    Planet();
-
+    Planet(int threads = 0);
     void start(QString address, quint16 port);
 
-private:
-    QTimer *pingCheckTimer;
-    QTcpServer *server;
+
+    //QTimer *pingCheckTimer;
 
     QList<Client*> clientList;
+    QReadWriteLock clientListLock;
+
     QList<Server*> serverList;
+    QReadWriteLock serverListLock;
+
     QHash<QString, int> clientIpCount;
+    QMutex clientIpCountMutex;
+
+    QList<ThreadWorker*> workerList;
 
     static const char PLANET_VERSION[];
 
@@ -58,20 +78,19 @@ private:
     static const qint64 CLIENT_PING_TIMEOUT = 3*60*1000 + 5*60*100;
     // 10*1000, i.e. 10 seconds. original value from the nfkplanet
     static const int CHECK_PING_TIMEOUT = 10*1000;
-    // original value
-    static const size_t MAX_CLIENT_COMMAND_LENGTH = 256;
-    // original message
-    static const char OLD_VERSION_MESSAGE[];
 
     int version;
+
+protected:
+    void incomingConnection(int socketDescriptor); //http://qt-project.org/doc/qt-4.8/network-threadedfortuneserver.html
+
+private:
+
 
     Settings &settings;
 
 private slots:
     void onPingCheck();
-    void onClientConnect();
-    void onClientDisconnected();
-    void onClientReadReady();
 
 };
 

@@ -29,6 +29,9 @@
 
 class Client;
 
+/** Server represents a game server.
+ */
+
 class Server
 {
 public:

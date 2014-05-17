@@ -16,19 +16,20 @@ TEMPLATE = app
 
 CONFIG(release, debug|release):DEFINES += QT_NO_DEBUG_OUTPUT
 
-
 SOURCES += \
     ../../src/main.cpp \
     ../../src/client.cpp \
     ../../src/server.cpp \
     ../../src/planet.cpp \
-    ../../src/settings.cpp
+    ../../src/settings.cpp \
+    ../../src/threadworker.cpp
 
 HEADERS += \
     ../../src/client.h \
     ../../src/server.h \
     ../../src/planet.h \
-    ../../src/settings.h
+    ../../src/settings.h \
+    ../../src/threadworker.h
 
 RESOURCES += \
     ../../resources/resources.qrc
